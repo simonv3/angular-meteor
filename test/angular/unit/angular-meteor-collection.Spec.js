@@ -71,7 +71,7 @@ describe('Given the $meteorCollection service', function() {
 
   describe('when instantiated', function() {
 
-    it('should return a Angular Meteor Collection with these methods: subscribe, save, remove, updateCursor and stop', function() {
+    it('should return a Angular Meteor Collection with these methods: subscribe, save, remove, updateDataFromCursor and stop', function() {
 
       var myCollection = new Mongo.Collection();
       var output = $meteorCollection(myCollection);
@@ -79,7 +79,7 @@ describe('Given the $meteorCollection service', function() {
       expect(typeof output.subscribe).toEqual('function');
       expect(typeof output.save).toEqual('function');
       expect(typeof output.remove).toEqual('function');
-      expect(typeof output.updateCursor).toEqual('function');
+      expect(typeof output.updateDataFromCursor).toEqual('function');
       expect(typeof output.stop).toEqual('function');
     });
 

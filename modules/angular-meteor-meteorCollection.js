@@ -226,8 +226,8 @@ angularMeteorCollections.factory('AngularMeteorCollection', ['$q', '$meteorSubsc
 
             diffArray(oldItems, newItems, {
               addedAt: function (id, item, index) {
-                self.splice(index, 1);
-                self.save(self[index]);
+                var newValue = self.splice(index, 1)[0];
+                self.save(newValue);
               },
               removedAt: function (id) {
                 self.remove(id);

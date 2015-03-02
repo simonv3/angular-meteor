@@ -4,7 +4,7 @@ var angularMeteorCollections = angular.module('angular-meteor.meteor-collection'
   ['angular-meteor.subscribe', 'angular-meteor.utils', 'diffArray']);
 
 
-var AngularMeteorCollection = function (cursor, $q, $meteorSubscribe, $meteorUtils, $rootScope, $timeout) {
+var AngularMeteorCollection = function (cursor, auto, $q, $meteorSubscribe, $meteorUtils, $rootScope, $timeout, diffArray) {
 
   var self = [];
 
@@ -13,8 +13,10 @@ var AngularMeteorCollection = function (cursor, $q, $meteorSubscribe, $meteorUti
   self.__proto__.$meteorSubscribe = $meteorSubscribe;
   self.__proto__.$rootScope = $rootScope;
   self.__proto__.$timeout = $timeout;
+  self.__proto__.diffArray = diffArray;
 
   self.$$collection = $meteorUtils.getCollectionByName(cursor.collection.name);
+  self.$$auto = auto;
 
   return self;
 };
@@ -154,11 +156,20 @@ AngularMeteorCollection.prototype.updateCursor = function (cursor) {
   function safeApply() {
     // Clearing the watch is needed so no updates are sent to server
     // while handling updates from the server
+    if (self.unregisterAutoBind){
+      self.unregisterAutoBind();
+      console.log('stopping in safeapply');
+    }
+
+
+    console.log('undefning in safeapply');
+    self.unregisterAutoBind = undefined;
     self.UPDATING_FROM_SERVER = true;
     if (!$rootScope.$$phase) $rootScope.$apply();
     // Making sure we are setting to false only after one digest cycle and not before
     $timeout(function(){
       self.UPDATING_FROM_SERVER = false;
+      self.setAutoBind();
     },0,false);
   }
 
@@ -190,6 +201,7 @@ AngularMeteorCollection.prototype.updateCursor = function (cursor) {
 };
 
 AngularMeteorCollection.prototype.stop = function () {
+  console.log('stopping in stop');
   if (this.unregisterAutoBind)
     this.unregisterAutoBind();
 
@@ -199,8 +211,61 @@ AngularMeteorCollection.prototype.stop = function () {
   }
 };
 
+AngularMeteorCollection.prototype.setAutoBind = function() {
+  var self = this,
+    diffArray = self.diffArray;
 
-angularMeteorCollections.factory('$meteorCollection', ['$q', '$meteorSubscribe', '$meteorUtils', '$rootScope', '$timeout', 'diffArray',
+  //console.log('(self.unregisterAutoBind == undefined)', (self.unregisterAutoBind == undefined));
+
+  console.log('outside', self.unregisterAutoBind);
+  if (!self.unregisterAutoBind) {
+    console.log('inside');
+    if (self.$$auto) { // Deep watches the model and performs autobind.
+      console.log('definind');
+      self.unregisterAutoBind = self.$rootScope.$watch(function () {
+        return _.without(self, 'UPDATING_FROM_SERVER');
+      }, function (newItems, oldItems) {
+        console.log('watch called', self.UPDATING_FROM_SERVER);
+        console.log('watch called', newItems !== oldItems);
+        console.log('watch called new', newItems);
+        console.log('watch called old', oldItems);
+        if (!self.UPDATING_FROM_SERVER && newItems !== oldItems) {
+
+          console.log('watch called inside');
+          diffArray(angular.copy(oldItems), angular.copy(newItems), {
+            addedAt: function (id, item, index) {
+              console.log('added');
+              var newValue = angular.copy(self[index]);
+              if (self.unregisterAutoBind){
+                self.unregisterAutoBind();
+                self.splice( index, 1 );
+                self.setAutoBind();
+              } else {
+                self.splice( index, 1 );
+              }
+              self.save(newValue);
+            },
+            removedAt: function (id, item, index) {
+              self.remove(id);
+            },
+            changedAt: function (id, setDiff, unsetDiff, index) {
+              if (setDiff)
+                self.save(setDiff);
+
+              if (unsetDiff)
+                self.save(unsetDiff, true);
+            },
+            movedTo: function (id, item, fromIndex, toIndex) {
+              // XXX do we need this?
+            }
+          });
+        }
+      }, true);
+    }
+  }
+};
+
+  angularMeteorCollections.factory('$meteorCollection', ['$q', '$meteorSubscribe', '$meteorUtils', '$rootScope', '$timeout', 'diffArray',
   function ($q, $meteorSubscribe, $meteorUtils, $rootScope, $timeout, diffArray) {
     return function (reactiveFunc, auto) {
       // Validate parameters
@@ -219,41 +284,7 @@ angularMeteorCollections.factory('$meteorCollection', ['$q', '$meteorSubscribe',
         }
       }
 
-      var ngCollection = new AngularMeteorCollection(reactiveFunc(), $q, $meteorSubscribe, $meteorUtils, $rootScope, $timeout);
-
-      function setAutoBind() {
-        if (auto) { // Deep watches the model and performs autobind.
-          ngCollection.unregisterAutoBind = $rootScope.$watch(function () {
-            return _.without(ngCollection, 'UPDATING_FROM_SERVER');
-          }, function (newItems, oldItems) {
-            if (!ngCollection.UPDATING_FROM_SERVER && newItems !== oldItems) {
-
-              diffArray(angular.copy(oldItems), angular.copy(newItems), {
-                addedAt: function (id, item, index) {
-                  var newValue = angular.copy(ngCollection[index]);
-                  ngCollection.unregisterAutoBind();
-                  ngCollection.splice( index, 1 );
-                  setAutoBind();
-                  ngCollection.save(newValue);
-                },
-                removedAt: function (id, item, index) {
-                  ngCollection.remove(id);
-                },
-                changedAt: function (id, setDiff, unsetDiff, index) {
-                  if (setDiff)
-                    ngCollection.save(setDiff);
-
-                  if (unsetDiff)
-                    ngCollection.save(unsetDiff, true);
-                },
-                movedTo: function (id, item, fromIndex, toIndex) {
-                  // XXX do we need this?
-                }
-              });
-            }
-          }, true);
-        }
-      }
+      var ngCollection = new AngularMeteorCollection(reactiveFunc(), auto, $q, $meteorSubscribe, $meteorUtils, $rootScope, $timeout, diffArray);
 
       /**
        * Fetches the latest data from Meteor and update the data variable.
@@ -265,7 +296,7 @@ angularMeteorCollections.factory('$meteorCollection', ['$q', '$meteorSubscribe',
           ngCollection.stop();
         });
         ngCollection.updateCursor(reactiveFunc());
-        setAutoBind();
+        ngCollection.setAutoBind();
       });
 
       return ngCollection;
